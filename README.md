@@ -26,7 +26,7 @@ This project implements a memory-efficient deduplication system using Bloom filt
 
 2. Install dependencies:
    ```sh
-   pip install pybloom-live psutil
+   pip3 install -r requirements.txt 
    ```
 
 ### Using Docker
