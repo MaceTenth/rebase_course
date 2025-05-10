@@ -35,6 +35,12 @@ class Config:
             return cls(chunk_size=0, input_file='', output_file='', test_file=args.test)
         elif not args.input_file or not args.output_file:
             parser.error('input_file and output_file are required unless --test is used')
+        
+        if args.input_file and os.path.exists(args.input_file):
+            if os.path.getsize(args.input_file) == 0:
+                parser.error(f"Input file '{args.input_file}' is empty.")
+        elif args.input_file:
+            parser.error(f"Input file '{args.input_file}' does not exist or is malformed.")
             
         return cls(
             chunk_size=args.chunk_size,
