@@ -20,7 +20,7 @@ class Config:
     output_file: str
     encoding: str = 'ascii'
     max_memory_mb: int = 4096  # Reduced to 4GB to stay safely under 8GB
-    debug: bool = False  # Add this field
+    debug: bool = False  
 
     @classmethod
     def from_args(cls) -> 'Config':
@@ -49,13 +49,13 @@ class Config:
             output_file=args.output_file,
             encoding=args.encoding,
             max_memory_mb=args.max_memory,
-            debug=args.debug  # Pass the debug flag
+            debug=args.debug  
         )
 
-# Constants
+
 TEMP_DIR: str = tempfile.mkdtemp()
 
-# Configure logging
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def log_memory_usage() -> None:
@@ -102,7 +102,7 @@ def write_sorted_chunk(lines: List[str], chunk_idx: int) -> str:
         raise
         
     logging.info(f"Chunk {chunk_idx} written to {temp_path}")
-    log_resource_usage()  # Changed from log_memory_usage
+    log_resource_usage()  
     return temp_path
 
 
@@ -162,7 +162,6 @@ def process_file_with_set(input_file: str, output_file: str, chunk_size: int = 2
     chunk_files = []
     current_chunk = set()
     lines_in_chunk = 0
-     # Process in smaller chunks
     
     def write_chunk():
         nonlocal chunk_number
@@ -272,7 +271,7 @@ def main():
         config.output_file, 
         config.chunk_size,
         config.max_memory_mb,
-        config  # Pass the config object
+        config  
     )
     
     verify_deduplication(config.input_file, config.output_file)
