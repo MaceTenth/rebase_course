@@ -18,9 +18,18 @@ export interface WorkerResult {
     memoryUsage: NodeJS.MemoryUsage;
 }
 
+export interface WorkerError {
+    type: 'error';
+    workerId: number;
+    taskFailed: Task;
+    error: string;
+}
+
 export interface WorkerStats {
     tasksCompleted: number;
     totalProcessingTime: number;
     primesFound: number;
     avgProcessingTime: number;
 }
+
+export type WorkerPerformance = 'slow' | 'average' | 'fast';

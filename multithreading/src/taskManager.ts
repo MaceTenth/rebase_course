@@ -7,9 +7,11 @@ export class TaskManager {
     private readonly NUM_CORES = os.cpus().length;
     private taskIdCounter = 0;
     private performanceHistory: number[] = [];
-
+    private recentGlobalAverage: number = 0;
+    
     createInitialTasks(fileSize: number): Task[] {
-        const initialChunkSize = Math.ceil(fileSize / (this.NUM_CORES * 4));
+        // Start with a more balanced chunk size based on file size and available cores
+        const initialChunkSize = this.calculateOptimalChunkSize(fileSize);
         const tasks: Task[] = [];
         
         for (let startByte = 0; startByte < fileSize; startByte += initialChunkSize) {
@@ -22,42 +24,92 @@ export class TaskManager {
         
         return tasks;
     }
-
-    calculateChunkSize(
-        fileSize: number,
-        currentTaskSize: number,
-        currentWorkerId: number,
-        workerStats: Map<number, WorkerStats>
-    ): number {
-        if (this.performanceHistory.length < 2) {
+    
+    // Calculate optimal initial chunk size based on file size and available cores
+    private calculateOptimalChunkSize(fileSize: number): number {
+        // For very small files, use smaller chunks
+        if (fileSize < this.MIN_CHUNK_SIZE * this.NUM_CORES * 2) {
+            return Math.max(Math.ceil(fileSize / (this.NUM_CORES * 2)), 1024); // At least 1KB
+        }
+        
+        // For medium files, aim for 4 tasks per core initially
+        if (fileSize < this.MAX_CHUNK_SIZE * this.NUM_CORES * 4) {
             return Math.ceil(fileSize / (this.NUM_CORES * 4));
         }
         
-        const avgProcessingTime = this.performanceHistory.reduce((a, b) => a + b, 0) / 
-            this.performanceHistory.length;
-        let adjustedSize = Math.ceil(fileSize / (this.NUM_CORES * 4));
+        // For large files, balance between MIN and MAX chunk size
+        const avgChunkSize = Math.ceil(fileSize / (this.NUM_CORES * 4));
+        return Math.min(Math.max(avgChunkSize, this.MIN_CHUNK_SIZE), this.MAX_CHUNK_SIZE);
+    }
+    
+    // This method is now simplified and used for adaptive chunk creation
+    // rather than searching for existing smaller tasks
+    calculateChunkSize(globalAverageTime: number): number {
+        // Use recent global average if available, otherwise use the provided one
+        const avgTime = this.recentGlobalAverage || globalAverageTime;
         
         // Adjust chunk size based on processing time
-        if (avgProcessingTime > 1000) {
-            adjustedSize = Math.max(adjustedSize / 2, this.MIN_CHUNK_SIZE);
-        } else if (avgProcessingTime < 100) {
-            adjustedSize = Math.min(adjustedSize * 1.5, this.MAX_CHUNK_SIZE);
+        let adaptiveSize: number;
+        
+        if (avgTime > 1000) {
+            // If tasks are taking too long, reduce chunk size
+            adaptiveSize = this.MIN_CHUNK_SIZE;
+        } else if (avgTime > 500) {
+            // Moderately sized chunks for medium processing times
+            adaptiveSize = (this.MIN_CHUNK_SIZE + this.MAX_CHUNK_SIZE) / 4;
+        } else if (avgTime > 200) {
+            // Balanced chunks for good processing times
+            adaptiveSize = (this.MIN_CHUNK_SIZE + this.MAX_CHUNK_SIZE) / 2;
+        } else {
+            // Larger chunks for fast processing times
+            adaptiveSize = this.MAX_CHUNK_SIZE;
         }
         
-        // Add prime density consideration
-        const workerStat = workerStats.get(currentWorkerId);
-        const primeDensity = workerStat ? 
-            workerStat.primesFound / currentTaskSize : 0;
+        return Math.ceil(adaptiveSize);
+    }
+    
+    // Create a new adaptive task based on remaining file size and worker performance
+    createAdaptiveTask(
+        startByte: number, 
+        endByte: number, 
+        workerPerformance: 'slow' | 'average' | 'fast',
+        globalAverageTime: number
+    ): Task {
+        const baseChunkSize = this.calculateChunkSize(globalAverageTime);
+        let adjustedChunkSize: number;
         
-        if (primeDensity > 0.5) {
-            adjustedSize = Math.max(adjustedSize / 1.5, this.MIN_CHUNK_SIZE);
+        // Adjust chunk size based on worker performance
+        switch (workerPerformance) {
+            case 'slow':
+                adjustedChunkSize = Math.max(baseChunkSize / 2, this.MIN_CHUNK_SIZE);
+                break;
+            case 'fast':
+                adjustedChunkSize = Math.min(baseChunkSize * 1.5, this.MAX_CHUNK_SIZE);
+                break;
+            default: // 'average'
+                adjustedChunkSize = baseChunkSize;
         }
         
-        return Math.ceil(adjustedSize);
+        // Make sure chunk isn't bigger than the remaining data
+        const actualChunkSize = Math.min(adjustedChunkSize, endByte - startByte);
+        
+        return {
+            startByte,
+            endByte: startByte + actualChunkSize,
+            id: this.taskIdCounter++
+        };
     }
 
     addPerformanceData(processingTime: number): void {
+        // Keep at most 20 recent processing times
+        if (this.performanceHistory.length >= 20) {
+            this.performanceHistory.shift();
+        }
         this.performanceHistory.push(processingTime);
+        
+        // Update the recent global average
+        this.recentGlobalAverage = this.performanceHistory.reduce((sum, time) => sum + time, 0) / 
+            this.performanceHistory.length;
     }
 
     getNumCores(): number {

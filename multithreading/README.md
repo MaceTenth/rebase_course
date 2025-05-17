@@ -1,6 +1,6 @@
 # Prime Number Counter
 
-This project reads numbers from an input file (`input.txt`), counts how many of those numbers are prime, and reports the total count along with the time taken for the computation.
+This project reads numbers from an input file, counts how many of those numbers are prime, and reports the total count along with the time taken for the computation.
 
 It utilizes Node.js worker threads to perform the primality tests in parallel, making use of multiple CPU cores for better performance.
 
