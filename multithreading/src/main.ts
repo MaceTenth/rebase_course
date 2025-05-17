@@ -38,7 +38,9 @@ if (isMainThread) {
                 workerId,
                 filePath: inputFilePath,
                 initialTask
-            }
+            },
+            // Remove execArgv and use resourceLimits:
+            resourceLimits: { maxOldGenerationSizeMb: 500 }
         });
 
         busyWorkers.add(workerId);
@@ -49,26 +51,21 @@ if (isMainThread) {
 
         worker.on('error', (error) => {
             console.error(`Worker ${workerId} error:`, error);
-            // Recover the task that was being processed
             const currentTask = statsManager.getCurrentTask(workerId);
             if (currentTask) {
                 console.log(`Main: Re-queueing failed task ${currentTask.id} from worker ${workerId}`);
                 failedTasks.push(currentTask);
             }
             busyWorkers.delete(workerId);
-            
-            // Create a new worker to replace the failed one if there are still tasks
             if (tasks.length > 0 || failedTasks.length > 0 || remainingFileRange !== null) {
-                const replacementTask = failedTasks.pop() || tasks.pop() || 
+                const replacementTask = failedTasks.pop() || tasks.pop() ||
                     (remainingFileRange && taskManager.createAdaptiveTask(
                         remainingFileRange.start,
                         remainingFileRange.end,
                         'average',
                         statsManager.getGlobalAverageProcessingTime()
                     ));
-                    
                 if (replacementTask) {
-                    // Update remainingFileRange if we created a task from it
                     if (remainingFileRange && replacementTask.startByte >= remainingFileRange.start) {
                         remainingFileRange.start = replacementTask.endByte;
                         if (remainingFileRange.start >= remainingFileRange.end) {
