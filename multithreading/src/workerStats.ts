@@ -7,6 +7,7 @@ export class WorkerStatsManager {
     private currentTasks: Map<number, Task> = new Map(); // Track current tasks by worker ID
     private globalAverageProcessingTime: number = 0; // Maintain a running global average
     private totalTasksCompleted: number = 0;
+    private updateLock = false;
 
     initWorkerStats(workerId: number): void {
         this.workerStats.set(workerId, {
@@ -18,23 +19,33 @@ export class WorkerStatsManager {
     }
 
     updateWorkerStats(result: WorkerResult): void {
-        const stats = this.workerStats.get(result.workerId);
-        if (stats) {
-            // Update individual worker stats
-            stats.tasksCompleted++;
-            stats.totalProcessingTime += result.processingTime;
-            stats.primesFound += result.count;
-            stats.avgProcessingTime = stats.totalProcessingTime / stats.tasksCompleted;
-            
-            // Update global average efficiently
-            this.totalTasksCompleted++;
-            this.globalAverageProcessingTime = (
-                (this.globalAverageProcessingTime * (this.totalTasksCompleted - 1)) + 
-                result.processingTime
-            ) / this.totalTasksCompleted;
-            
-            // Clear current task tracking
-            this.currentTasks.delete(result.workerId);
+        // Wait for lock to be released
+        while (this.updateLock) {
+            // Busy wait
+        }
+        
+        try {
+            this.updateLock = true;
+            const stats = this.workerStats.get(result.workerId);
+            if (stats) {
+                // Update individual worker stats
+                stats.tasksCompleted++;
+                stats.totalProcessingTime += result.processingTime;
+                stats.primesFound += result.count;
+                stats.avgProcessingTime = stats.totalProcessingTime / stats.tasksCompleted;
+                
+                // Update global average efficiently
+                this.totalTasksCompleted++;
+                this.globalAverageProcessingTime = (
+                    (this.globalAverageProcessingTime * (this.totalTasksCompleted - 1)) + 
+                    result.processingTime
+                ) / this.totalTasksCompleted;
+                
+                // Clear current task tracking
+                this.currentTasks.delete(result.workerId);
+            }
+        } finally {
+            this.updateLock = false;
         }
     }
 
@@ -44,8 +55,13 @@ export class WorkerStatsManager {
     }
 
     // Get the current task a worker is processing (for error recovery)
-    getCurrentTask(workerId: number): Task | undefined {
-        return this.currentTasks.get(workerId);
+    getCurrentTask(workerId: number): Task | null {
+        return this.currentTasks.get(workerId) || null;
+    }
+
+    // Clear the current task for a worker
+    clearWorkerTask(workerId: number): void {
+        this.currentTasks.delete(workerId);
     }
 
     // Determine if a worker is slow, average, or fast based on its performance
@@ -73,6 +89,11 @@ export class WorkerStatsManager {
     // Get the global average processing time
     getGlobalAverageProcessingTime(): number {
         return this.globalAverageProcessingTime;
+    }
+
+    // Get the total number of processed tasks across all workers
+    getTotalProcessed(): number {
+        return Array.from(this.workerStats.values()).reduce((total, stats) => total + stats.tasksCompleted, 0);
     }
 
     updateProgress(fileSize: number, totalBytesProcessed: number, startTime: [number, number]): void {
