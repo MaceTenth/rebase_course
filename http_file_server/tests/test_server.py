@@ -165,10 +165,10 @@ def test_header_too_long():
     blob_id = generate_random_id()
     content = generate_random_content(1024)
     
-    # Create a header that exceeds MAX_HEADER_LENGTH (50)
+    # Create a header that exceeds MAX_HEADER_LENGTH (100)
     headers = {
         "Content-Type": "application/octet-stream",
-        "X-Rebase-Test": "x" * 45  # Key + value should exceed 50 chars
+        "X-Rebase-Test": "x" * 95  # Key (13) + value (95) = 108 chars, exceeding 100
     }
     
     response = client.post(f"/blobs/{blob_id}", content=content, headers=headers)
