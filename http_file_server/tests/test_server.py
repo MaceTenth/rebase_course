@@ -7,45 +7,58 @@ import subprocess
 import random
 import string
 import shutil
+import asyncio
 from pathlib import Path
 from fastapi.testclient import TestClient
+from httpx import AsyncClient
 import sys
 import json
+import pytest_asyncio
 
 # Add the parent directory to sys.path so we can import main
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Import our FastAPI app
-from main import app, StorageManager, DATA_DIR, TEMP_DIR
+# Test directory for isolated testing
+TEST_DATA_DIR = Path("test_data").absolute()
+TEST_TEMP_DIR = Path("test_temp").absolute()
+
+# Import our FastAPI app and override the DATA_DIR and TEMP_DIR
+import config
+config.DATA_DIR = str(TEST_DATA_DIR)
+config.TEMP_DIR = str(TEST_TEMP_DIR)
+
+# Now import the app after updating config
+from main import app, StorageManager
 
 # Create a test client
 client = TestClient(app)
 
-# Test directory for isolated testing
-TEST_DATA_DIR = Path("./test_data")
-TEST_TEMP_DIR = Path("./test_temp")
 
-
-@pytest.fixture(autouse=True)
-def setup_and_teardown():
+@pytest_asyncio.fixture(autouse=True)
+async def setup_and_teardown():
     """Setup and teardown for tests."""
+    # Clean up any existing test directories
+    shutil.rmtree(TEST_DATA_DIR, ignore_errors=True)
+    shutil.rmtree(TEST_TEMP_DIR, ignore_errors=True)
+    
     # Create test directories
     TEST_DATA_DIR.mkdir(exist_ok=True, parents=True)
     TEST_TEMP_DIR.mkdir(exist_ok=True, parents=True)
     
-    # Patch the storage manager to use test directories
-    app.state.original_storage_manager = app.state.storage_manager if hasattr(app.state, 'storage_manager') else None
-    app.state.storage_manager = StorageManager(TEST_DATA_DIR, TEST_TEMP_DIR)
+    # Create and initialize storage manager for tests
+    test_storage_manager = StorageManager(TEST_DATA_DIR, TEST_TEMP_DIR)
+    await test_storage_manager.initialize()
+    
+    # Important: attach storage manager to app state
+    app.state.storage_manager = test_storage_manager
+    print(f"Test setup: Created StorageManager instance {id(test_storage_manager)}")
     
     yield
     
+    print(f"Test teardown: Cleaning up test directories")
     # Clean up test directories
     shutil.rmtree(TEST_DATA_DIR, ignore_errors=True)
     shutil.rmtree(TEST_TEMP_DIR, ignore_errors=True)
-    
-    # Restore original storage manager
-    if app.state.original_storage_manager:
-        app.state.storage_manager = app.state.original_storage_manager
 
 
 def generate_random_id(length=10):
@@ -245,6 +258,56 @@ def test_content_type_inference():
     response = client.get(f"/blobs/{blob_id}")
     assert response.headers.get("content-type") == "application/json" or response.headers.get("content-type") == "application/octet-stream"
 
+
+@pytest.mark.asyncio
+async def test_disk_quota_update():
+    """Test disk quota updates properly when uploading and deleting blobs."""
+    storage_manager = app.state.storage_manager
+    print(f"Test: Using StorageManager instance {id(storage_manager)}")
+    print(f"Test: Initial disk usage: {storage_manager.disk_usage}")
+    
+    blob_id = generate_random_id()
+    content = generate_random_content(1024)  # 1KB content
+    headers = {"Content-Type": "application/octet-stream"}
+    
+    # Get initial disk usage
+    initial_usage = storage_manager.disk_usage
+    print(f"Test: Initial usage before upload: {initial_usage}")
+    
+    # Upload blob
+    response = client.post(f"/blobs/{blob_id}", content=content, headers=headers)
+    assert response.status_code == 200
+    
+    # Verify the file exists
+    blob_path, headers_path = storage_manager.get_blob_path(blob_id)
+    assert blob_path.exists(), "Blob file was not created"
+    assert headers_path.exists(), "Headers file was not created"
+    
+    print(f"Test: Files created - blob: {blob_path.exists()}, headers: {headers_path.exists()}")
+    
+    # Calculate expected size increase
+    content_size = len(content)
+    headers_size = len("Content-Type: application/octet-stream\n")
+    expected_size = initial_usage + content_size + headers_size
+    
+    print(f"Test: After upload - Current: {storage_manager.disk_usage}, Expected: {expected_size}")
+    
+    # Get disk usage after upload
+    assert storage_manager.disk_usage > initial_usage, f"Disk usage should increase after upload. Before: {initial_usage}, After: {storage_manager.disk_usage}"
+    assert storage_manager.disk_usage == expected_size, f"Expected disk usage {expected_size}, got {storage_manager.disk_usage}"
+    
+    # Delete blob
+    response = client.delete(f"/blobs/{blob_id}")
+    assert response.status_code == 200
+    
+    # Wait for async operations to complete
+    await asyncio.sleep(0.1)
+    
+    # Check disk usage returned to initial state and files are deleted
+    assert storage_manager.disk_usage == initial_usage, f"Expected disk usage to return to {initial_usage}, got {storage_manager.disk_usage}"
+    assert not blob_path.exists(), "Blob file was not deleted"
+    assert not headers_path.exists(), "Headers file was not deleted"
+        
 
 if __name__ == "__main__":
     pytest.main(["-xvs", __file__])
