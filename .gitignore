@@ -3,7 +3,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-*.txt
 .Python
 build/
 develop-eggs/
@@ -22,6 +21,7 @@ wheels/
 *.egg
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 .tox/
 .venv
@@ -29,6 +29,13 @@ venv/
 ENV/
 env/
 .env
+
+# Node/TypeScript
+node_modules/
+dist/
+*.js
+*.js.map
+*.d.ts
 
 # Docker
 .docker/
@@ -58,3 +65,13 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Project specific
+!requirements.txt
+*.txt
+test_*.txt
+
+.github
+data/
+temp/
+
