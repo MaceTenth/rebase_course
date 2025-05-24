@@ -2,8 +2,8 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
-from fastapi import FastAPI, Request, HTTPException, Header, UploadFile, BackgroundTasks, Depends
+from typing import Dict, Tuple
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import StreamingResponse, Response
 import uvicorn
 import hashlib
@@ -67,7 +67,7 @@ class StorageManager:
         logger.info(f"Current disk usage: {self.disk_usage / (1024*1024):.2f} MB")
         
         # Check available disk space
-        total, used, free = shutil.disk_usage(str(self.data_dir))
+        _, _, free = shutil.disk_usage(str(self.data_dir))
         required_space = config.MAX_DISK_QUOTA * 1.5
         if free < required_space:
             raise RuntimeError(f"Insufficient disk space. Need at least {required_space / (1024*1024*1024):.2f} GB free")
@@ -194,8 +194,7 @@ def validate_ascii_headers(headers: Dict[str, str]):
 async def upload_blob(
     blob_id: str, 
     request: Request,
-    content_length_value: int = Depends(check_content_length),
-    background_tasks: BackgroundTasks = None
+    content_length_value: int = Depends(check_content_length)
 ):
     """Upload a binary blob with the given ID."""
     storage_manager = request.app.state.storage_manager

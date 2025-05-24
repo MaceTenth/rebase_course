@@ -10,7 +10,6 @@ MAX_HEADER_COUNT = 20
 
 # Blob constraints
 MAX_ID_LENGTH = 200
-MAX_BLOBS_IN_FOLDER = 10000
 
 # Directory paths
 DATA_DIR = "./data"
