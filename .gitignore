@@ -67,8 +67,8 @@ Thumbs.db
 logs/
 
 # Project specific
-!requirements.txt
 *.txt
+!requirements.txt
 test_*.txt
 
 .github
