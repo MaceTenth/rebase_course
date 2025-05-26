@@ -117,7 +117,8 @@ async def upload_blob(
     # Extract headers that should be stored
     headers = {k.lower(): v for k, v in request.headers.items()}
     storable_headers = get_storable_headers(headers)
-    
+
+    # RON: not sure what you mean here. any byte can be encoded to ascii.
     # Validate ASCII headers
     validate_ascii_headers(storable_headers)
     
@@ -147,7 +148,7 @@ async def upload_blob(
     blob_path, headers_path = storage_manager.get_blob_path(blob_id)
     temp_blob_path = TEMP_DIR / f"{blob_id}_temp.blob"
     temp_headers_path = TEMP_DIR / f"{blob_id}_temp.headers"
-    
+
     # Get sizes of existing files if we're overwriting
     old_blob_size = blob_path.stat().st_size if blob_path.exists() else 0
     old_headers_size = headers_path.stat().st_size if headers_path.exists() else 0
@@ -165,6 +166,7 @@ async def upload_blob(
             async for chunk in request.stream():
                 content_size += len(chunk)
                 if content_size > content_length_value:
+                    # RON: very cool! well done!
                     # Client sent more data than declared
                     await aiofiles.os.unlink(temp_blob_path)
                     await aiofiles.os.unlink(temp_headers_path)
@@ -216,6 +218,10 @@ async def get_blob(blob_id: str, request: Request):
     
     # Read headers if they exist
     headers = {}
+    # RON:
+    # 1. consider refactoring to:
+    # content_type = get_or_infer_content_type(..)
+    # 2. consider doing this action on 'upload_blob' flow, and write the "correct" content-type header only once.
     content_type = "application/octet-stream"
     
     if await aiofiles.os.path.exists(headers_path):

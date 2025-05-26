@@ -76,6 +76,8 @@ def test_post_get_delete_blob():
     """Test basic POST, GET, and DELETE operations."""
     blob_id = generate_random_id()
     content = generate_random_content(1024)  # 1KB content
+    # RON: consider using random values stored in local variables for content type and the x-rebase header
+    # and then test against them.
     headers = {
         "Content-Type": "application/octet-stream",
         "X-Rebase-Test": "test-value"
@@ -95,6 +97,7 @@ def test_post_get_delete_blob():
     
     # DELETE
     response = client.delete(f"/blobs/{blob_id}")
+    # RON: although it's your API design, a common practice is to only check against the response code in this scenario
     assert response.status_code == 200
     assert response.json().get("success") == True
     
@@ -115,6 +118,7 @@ def test_invalid_blob_id():
     
     response = client.post(f"/blobs/{long_id}", content=content)
     assert response.status_code == 400
+    # RON: when you check an explicit error message, consider insensitive casing: assert "foo" in bar.lower()
     assert "Invalid blob ID format" in response.text
     
     # Test 2: Test with invalid characters that are valid in URLs
@@ -131,7 +135,11 @@ def test_missing_content_length():
     
     # Using requests directly to remove Content-Length header
     url = f"http://testserver/blobs/{blob_id}"
-    
+
+    # RON: as you explained below, this is a bit hacky. consider the following alternative:
+    # extract the logic of check_content_length to pure python data structures, namely you can write something like:
+    # return parse_content_length(request.headers)
+    # then, you can unit test the function try_parse_content_length.
     # TestClient always adds Content-Length, so we're checking the route handling
     # This is a bit hacky but works for testing
     response = client.post(
@@ -186,7 +194,8 @@ def test_blob_too_large():
         "Content-Type": "application/octet-stream",
         "Content-Length": str(11 * 1024 * 1024)  # 11MB
     }
-    
+
+    # RON: you filthy lier!
     # Send a small content but lie about the size
     response = client.post(f"/blobs/{blob_id}", content=b"small content", headers=headers)
     assert response.status_code == 400
@@ -235,6 +244,7 @@ def test_content_type_inference():
     response = client.post(
         f"/blobs/{blob_id}",
         content=content,
+        # RON: seems like this header is not really inferring...
         headers={"Content-Type": "text/plain"}
     )
     assert response.status_code == 200
@@ -259,6 +269,7 @@ def test_content_type_inference():
     assert response.headers.get("content-type") == "application/json" or response.headers.get("content-type") == "application/octet-stream"
 
 
+# RON: that's a nice test. however, consider testing StorageManager class directly
 @pytest.mark.asyncio
 async def test_disk_quota_update():
     """Test disk quota updates properly when uploading and deleting blobs."""

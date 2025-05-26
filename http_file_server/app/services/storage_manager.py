@@ -34,7 +34,8 @@ class StorageManager:
         self.data_dir.mkdir(exist_ok=True, parents=True)
         self.temp_dir.mkdir(exist_ok=True, parents=True)
         logger.debug(f"Storage directories created/verified: {self.data_dir}, {self.temp_dir}")
-        
+
+        # RON: consider refactoring to a standalone method
         # Clean temp directory at startup
         files_removed = 0
         for file in self.temp_dir.glob("*"):
@@ -42,7 +43,8 @@ class StorageManager:
                 await aiofiles.os.unlink(file)
                 files_removed += 1
         logger.info(f"Cleaned temporary directory, removed {files_removed} files")
-        
+
+        # RON: consider refactoring to a standalone method: self.disk_usage = calculate_disk_usage()
         # Calculate current disk usage
         self.disk_usage = 0
         for folder_path, _, files in os.walk(self.data_dir):
@@ -81,8 +83,10 @@ class StorageManager:
         async with self.disk_usage_lock:
             previous_usage = self.disk_usage
             self.disk_usage += size_change
+            # RON: logging is not part of the critical code. consider moving the logging outside the lock's scope
             logger.debug(f"Disk usage updated. Previous: {previous_usage}, Change: {size_change}, New: {self.disk_usage}")
         
+    # RON: returned value is not used. consider changing the signature.
     async def delete_blob(self, blob_id: str) -> bool:
         """Delete a blob and its headers file."""
         blob_path, headers_path = self.get_blob_path(blob_id)
