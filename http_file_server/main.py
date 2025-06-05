@@ -2,8 +2,8 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Dict, Tuple
-from fastapi import FastAPI, Request, HTTPException, Depends
+from typing import Dict, Tuple, Optional, Annotated, Union
+from fastapi import FastAPI, Request, HTTPException, Depends, Header, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, Response
 import uvicorn
 import hashlib
@@ -100,14 +100,25 @@ def validate_ascii_headers(headers: Dict[str, str]):
 
 @app.post("/blobs/{blob_id}")
 async def upload_blob(
-    blob_id: str, 
-    request: Request,
-    content_length_value: int = Depends(check_content_length)
+    blob_id: str,
+    file: UploadFile = File(...),
+    request: Request = None
 ):
-    """Upload a binary blob with the given ID."""
+    """Upload a binary blob with the given ID.
+    
+    Args:
+        blob_id: The ID to store the blob under
+        file: The file to upload
+    """
     storage_manager = request.app.state.storage_manager
     
     logger.info(f"Receiving upload request for blob_id: {blob_id}")
+    
+    # Get content length from the file
+    file.file.seek(0, 2)  # Seek to end
+    content_length_value = file.file.tell()  # Get file size
+    file.file.seek(0)  # Reset to beginning
+    
     logger.debug(f"Content-Length: {content_length_value} bytes")
 
     # Validate ID
@@ -118,7 +129,13 @@ async def upload_blob(
     headers = {k.lower(): v for k, v in request.headers.items()}
     storable_headers = get_storable_headers(headers)
 
-    # RON: not sure what you mean here. any byte can be encoded to ascii.
+    # Store original filename from the uploaded file
+    original_filename = file.filename or blob_id
+    
+    # Add content type to storable headers if provided
+    if file.content_type:
+        storable_headers["content-type"] = file.content_type
+    
     # Validate ASCII headers
     validate_ascii_headers(storable_headers)
     
@@ -145,7 +162,7 @@ async def upload_blob(
         raise HTTPException(status_code=400, detail="Disk quota exceeded")
     
     # Get blob path and create a temporary file for streaming
-    blob_path, headers_path = storage_manager.get_blob_path(blob_id)
+    blob_path, headers_path, metadata_path = storage_manager.get_blob_path(blob_id)
     temp_blob_path = TEMP_DIR / f"{blob_id}_temp.blob"
     temp_headers_path = TEMP_DIR / f"{blob_id}_temp.headers"
 
@@ -153,33 +170,23 @@ async def upload_blob(
     old_blob_size = blob_path.stat().st_size if blob_path.exists() else 0
     old_headers_size = headers_path.stat().st_size if headers_path.exists() else 0
     
-    # Save the file in chunks
-    content_size = 0
     try:
         # First write headers to temp file
-        async with aiofiles.open(temp_headers_path, 'w') as file:
+        async with aiofiles.open(temp_headers_path, 'w') as f:
             for key, value in storable_headers.items():
-                await file.write(f"{key}: {value}\n")
+                await f.write(f"{key}: {value}\n")
         
-        # Then write content to temp file
-        async with aiofiles.open(temp_blob_path, 'wb') as file:
-            async for chunk in request.stream():
+        # Save content using chunks for memory efficiency
+        content_size = 0
+        async with aiofiles.open(temp_blob_path, 'wb') as f:
+            while chunk := await file.read(8192):  # 8KB chunks
                 content_size += len(chunk)
-                if content_size > content_length_value:
-                    # RON: very cool! well done!
-                    # Client sent more data than declared
-                    await aiofiles.os.unlink(temp_blob_path)
-                    await aiofiles.os.unlink(temp_headers_path)
-                    raise HTTPException(status_code=400, detail="Content length mismatch")
-                await file.write(chunk)
+                await f.write(chunk)
+
+        # Store metadata including original filename
+        await storage_manager.store_metadata(blob_id, original_filename)
         
-        # Ensure we received exactly the amount of data specified
-        if content_size != content_length_value:
-            await aiofiles.os.unlink(temp_blob_path)
-            await aiofiles.os.unlink(temp_headers_path)
-            raise HTTPException(status_code=400, detail="Content length mismatch")
-        
-        # Move the temporary files to their final locations
+        # Move files to final location
         await aiofiles.os.rename(str(temp_headers_path), str(headers_path))
         await aiofiles.os.rename(str(temp_blob_path), str(blob_path))
         
@@ -187,9 +194,8 @@ async def upload_blob(
         disk_usage_change = (content_size + headers_size) - (old_blob_size + old_headers_size)
         await storage_manager.update_disk_usage(disk_usage_change)
         
-        logger.info(f"Successfully uploaded blob: {blob_id}")
         return {"success": True, "message": f"Blob {blob_id} uploaded successfully"}
-    
+        
     except Exception as e:
         logger.error(f"Error uploading blob {blob_id}: {str(e)}", exc_info=True)
         # Clean up temporary files if operation fails
@@ -209,8 +215,8 @@ async def get_blob(blob_id: str, request: Request):
     # Validate ID
     validate_blob_id(blob_id)
     
-    # Get blob path
-    blob_path, headers_path = storage_manager.get_blob_path(blob_id)
+    # Get blob paths
+    blob_path, headers_path, _ = storage_manager.get_blob_path(blob_id)
     
     # Check if blob exists
     if not await aiofiles.os.path.exists(blob_path):
@@ -218,10 +224,6 @@ async def get_blob(blob_id: str, request: Request):
     
     # Read headers if they exist
     headers = {}
-    # RON:
-    # 1. consider refactoring to:
-    # content_type = get_or_infer_content_type(..)
-    # 2. consider doing this action on 'upload_blob' flow, and write the "correct" content-type header only once.
     content_type = "application/octet-stream"
     
     if await aiofiles.os.path.exists(headers_path):
@@ -232,23 +234,30 @@ async def get_blob(blob_id: str, request: Request):
                     headers[key] = value
                     if key.lower() == "content-type":
                         content_type = value
-    else:
-        # Try to infer content type if not specified in headers
-        guessed_type, _ = mimetypes.guess_type(blob_id)
+
+    # Get metadata to use original filename
+    metadata = await storage_manager.get_metadata(blob_id)
+    original_filename = metadata.get('original_filename', blob_id)
+    
+    # Try to infer content type from original filename if not specified in headers
+    if content_type == "application/octet-stream":
+        guessed_type, _ = mimetypes.guess_type(original_filename)
         if guessed_type:
             content_type = guessed_type
+            
+    # Add Content-Disposition header with original filename
+    headers['content-disposition'] = f'attachment; filename="{original_filename}"'
     
-    # Create a streaming response for the blob
+    # Create streaming response
     async def file_iterator():
         async with aiofiles.open(blob_path, 'rb') as file:
             while chunk := await file.read(8192):  # 8KB chunks
                 yield chunk
     
-    response_headers = {k: v for k, v in headers.items()}
     return StreamingResponse(
         file_iterator(),
         media_type=content_type,
-        headers=response_headers
+        headers=headers
     )
 
 

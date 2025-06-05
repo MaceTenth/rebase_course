@@ -9,6 +9,7 @@ from typing import Dict, Tuple
 import logging
 from logger_config import setup_logger
 import config
+import json
 
 logger = setup_logger()
 
@@ -62,22 +63,38 @@ class StorageManager:
         if free < required_space:
             raise RuntimeError(f"Insufficient disk space. Need at least {required_space / (1024*1024*1024):.2f} GB free")
 
-    def get_blob_path(self, blob_id: str) -> Tuple[Path, Path]:
-        """Get the path where a blob should be stored based on its ID."""
-        # Use first 2 chars of MD5 hash as directory name to avoid too many files in one directory
+    def get_blob_path(self, blob_id: str) -> Tuple[Path, Path, Path]:
+        """Get the paths where a blob should be stored based on its ID."""
+        # Use first 2 chars of MD5 hash as directory name
         hash_prefix = hashlib.md5(blob_id.encode()).hexdigest()[:2]
         directory = self.data_dir / hash_prefix
         directory.mkdir(exist_ok=True)
         
         blob_path = directory / f"{blob_id}.blob"
         headers_path = directory / f"{blob_id}.headers"
+        metadata_path = directory / f"{blob_id}.meta"  # New metadata file
         
-        return blob_path, headers_path
-    
-    def check_disk_quota(self, additional_size: int) -> bool:
-        """Check if storing additional data would exceed the disk quota."""
-        return (self.disk_usage + additional_size) <= config.MAX_DISK_QUOTA
-    
+        return blob_path, headers_path, metadata_path
+
+    async def store_metadata(self, blob_id: str, original_filename: str):
+        """Store metadata about the blob."""
+        _, _, metadata_path = self.get_blob_path(blob_id)
+        metadata = {
+            "original_filename": original_filename
+        }
+        async with aiofiles.open(metadata_path, 'w') as f:
+            await f.write(json.dumps(metadata))
+
+    async def get_metadata(self, blob_id: str) -> dict:
+        """Get metadata about the blob."""
+        _, _, metadata_path = self.get_blob_path(blob_id)
+        try:
+            async with aiofiles.open(metadata_path, 'r') as f:
+                content = await f.read()
+                return json.loads(content)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+        
     async def update_disk_usage(self, size_change: int):
         """Update the disk usage counter thread-safely."""
         async with self.disk_usage_lock:
@@ -107,3 +124,14 @@ class StorageManager:
             await self.update_disk_usage(-total_size)
             return True
         return False
+
+    def check_disk_quota(self, additional_size: int) -> bool:
+        """Check if storing additional data would exceed the disk quota.
+        
+        Args:
+            additional_size: Size in bytes of new data to be stored
+            
+        Returns:
+            bool: True if adding the data won't exceed quota, False otherwise
+        """
+        return (self.disk_usage + additional_size) <= config.MAX_DISK_QUOTA
