@@ -105,19 +105,22 @@ class StorageManager:
         
     # RON: returned value is not used. consider changing the signature.
     async def delete_blob(self, blob_id: str) -> bool:
-        """Delete a blob and its headers file."""
-        blob_path, headers_path = self.get_blob_path(blob_id)
+        """Delete a blob and its associated files."""
+        blob_path, headers_path, metadata_path = self.get_blob_path(blob_id)
         
         # Get sizes before deleting
         blob_size = await self.get_file_size(blob_path)
         headers_size = await self.get_file_size(headers_path)
-        total_size = blob_size + headers_size
+        metadata_size = await self.get_file_size(metadata_path)
+        total_size = blob_size + headers_size + metadata_size
         
         # Delete files if they exist
         if blob_size > 0:
             await aiofiles.os.unlink(blob_path)
         if headers_size > 0:
             await aiofiles.os.unlink(headers_path)
+        if metadata_size > 0:
+            await aiofiles.os.unlink(metadata_path)
             
         # Update disk usage if any files were deleted
         if total_size > 0:

@@ -3,7 +3,7 @@ import re
 import shutil
 from pathlib import Path
 from typing import Dict, Tuple, Optional, Annotated, Union
-from fastapi import FastAPI, Request, HTTPException, Depends, Header, UploadFile, File, Form
+from fastapi import FastAPI, Request, HTTPException, Depends, Header, UploadFile, File, Form, Query
 from fastapi.responses import StreamingResponse, Response
 import uvicorn
 import hashlib
@@ -16,6 +16,8 @@ import aiofiles.os
 import logging
 from logger_config import setup_logger
 from app.services.storage_manager import StorageManager
+from app.services.proxy_service import ProxyService
+from urllib.parse import urlparse
 
 # Data storage path
 DATA_DIR = Path(config.DATA_DIR)
@@ -24,11 +26,14 @@ TEMP_DIR = Path(config.TEMP_DIR)
 # Logger setup
 logger = setup_logger()
 
+# Maximum response size for proxy (10MB)
+MAX_PROXY_RESPONSE_SIZE = 10 * 1024 * 1024
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create and initialize storage manager
+    # Create and initialize services
     app.state.storage_manager = StorageManager(DATA_DIR, TEMP_DIR)
+    app.state.proxy_service = ProxyService(MAX_PROXY_RESPONSE_SIZE)
     await app.state.storage_manager.initialize()
     yield
     # Cleanup operations can be added here
@@ -276,6 +281,36 @@ async def delete_blob(blob_id: str, request: Request):
     logger.info(f"Successfully deleted blob: {blob_id}")
     # Always return success even if blob doesn't exist (as per requirements)
     return {"success": True, "message": f"Blob {blob_id} deleted"}
+
+
+@app.get("/proxy")
+async def proxy(
+    request: Request,
+    url: str = Query(..., description="The target URL to proxy to"),
+):
+    """Forward GET requests to the specified URL.
+    
+    Only supports HTTP GET requests. The response payload must not exceed 10MB.
+    All request headers are forwarded to the target, including Host header.
+    """
+    # Validate request method
+    if request.method != "GET":
+        raise HTTPException(status_code=405, detail="Only GET requests are supported")
+    
+    proxy_service = request.app.state.proxy_service
+    
+    # Validate URL
+    url = proxy_service.validate_url(url)
+    
+    # Forward the request and get response data
+    response_data = await proxy_service.forward_request(url, dict(request.headers))
+    
+    return Response(
+        content=response_data['content'],
+        status_code=response_data['status_code'],
+        headers=response_data['headers'],
+        media_type=response_data['media_type']
+    )
 
 
 if __name__ == "__main__":
