@@ -1,8 +1,0 @@
-fastapi
-uvicorn
-python-multipart
-pytest
-requests
-httpx
-aiofiles
-pytest-asyncio
