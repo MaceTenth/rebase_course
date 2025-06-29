@@ -21,38 +21,54 @@ class UserRepository:
 
     @staticmethod
     def upsert_user(email: str, full_name: str):
-        user_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
+        user_id = str(uuid.uuid4())
         with get_connection() as conn:
             with conn.cursor() as cur:
-                # First try to update existing user
+                # First check if user exists with same data
                 cur.execute('''
-                    UPDATE users 
-                    SET full_name = %s,
-                        deleted_since = NULL
+                    SELECT id FROM users 
                     WHERE email = %s 
-                      AND (full_name <> %s OR deleted_since IS NOT NULL)
-                    RETURNING id, deleted_since
-                ''', (full_name, email, full_name))
+                    AND full_name = %s 
+                    AND deleted_since IS NULL
+                ''', (email, full_name))
                 
-                result = cur.fetchone()
-                
-                if result:
-                    # Update was successful
-                    conn.commit()
-                    return result, False  # False indicates no new record created
-                
-                # If no update occurred, insert new user
+                existing_user = cur.fetchone()
+                if existing_user:
+                    # User exists with exactly same data, no changes needed
+                    return existing_user[0], None
+
+                # Proceed with upsert if changes are needed
                 cur.execute('''
-                    INSERT INTO users (id, email, full_name, joined_at, deleted_since)
-                    VALUES (%s, %s, %s, %s, NULL)
-                    ON CONFLICT (email) DO NOTHING
-                    RETURNING id, deleted_since
-                ''', (user_id, email, full_name, now))
+                    WITH updated AS (
+                        INSERT INTO users (id, email, full_name, joined_at, deleted_since)
+                        VALUES (%s, %s, %s, %s, NULL)
+                        ON CONFLICT (email) DO UPDATE 
+                        SET full_name = CASE
+                                WHEN users.deleted_since IS NOT NULL THEN %s
+                                WHEN users.full_name <> %s THEN %s
+                                ELSE users.full_name
+                            END,
+                            deleted_since = CASE
+                                WHEN users.deleted_since IS NOT NULL THEN NULL
+                                ELSE users.deleted_since
+                            END
+                        RETURNING id, 
+                                CASE 
+                                    WHEN xmax = 0 THEN true  -- This is a new insert
+                                    ELSE false               -- This is an update
+                                END as is_new
+                    )
+                    SELECT * FROM updated
+                ''', (user_id, email, full_name, now, full_name, full_name, full_name))
                 
                 result = cur.fetchone()
                 conn.commit()
-                return (result, True) if result else (None, False)  # True indicates new record created
+                
+                if not result:
+                    return None, None
+                    
+                return result
 
     @staticmethod
     def get_user(email: str):

@@ -9,34 +9,38 @@ router = APIRouter()
 @router.post("/users/")
 def upsert_user(user: UserIn, response: Response):
     result = UserRepository.upsert_user(user.email, user.full_name)
-    if result:
-        (user_data, is_new) = result
-        if user_data:
-            user_id, deleted_since = user_data
-            if deleted_since is not None:
-                logger.info(structured_log(
-                    "User reactivated",
-                    event="user_reactivated",
-                    user_id=user_id,
-                    email=user.email,
-                    operation="upsert"
-                ))
-                response.status_code = status.HTTP_200_OK
-                return {"detail": "User reactivated"}
-            else:
-                logger.info(structured_log(
-                    "User updated" if not is_new else "User created",
-                    event="user_updated" if not is_new else "user_created",
-                    user_id=user_id,
-                    email=user.email,
-                    operation="upsert"
-                ))
-                response.status_code = status.HTTP_200_OK if not is_new else status.HTTP_201_CREATED
-                return {"detail": "User updated" if not is_new else "User created"}
+    if not result:
+        response.status_code = status.HTTP_400_BAD_REQUEST
+        return {"detail": "Operation failed"}
         
-    # No changes were made (user exists with same data)
-    response.status_code = status.HTTP_200_OK
-    return {"detail": "No changes required"}
+    user_id, is_new = result
+    
+    if is_new is None:
+        # No changes were needed (user exists with same data)
+        response.status_code = status.HTTP_200_OK
+        return {"detail": "No changes required"}
+    elif is_new:
+        # New user created
+        logger.info(structured_log(
+            "User created",
+            event="user_created",
+            user_id=user_id,
+            email=user.email,
+            operation="upsert"
+        ))
+        response.status_code = status.HTTP_201_CREATED
+        return {"detail": "User created"}
+    else:
+        # Existing user updated
+        logger.info(structured_log(
+            "User updated",
+            event="user_updated",
+            user_id=user_id,
+            email=user.email,
+            operation="upsert"
+        ))
+        response.status_code = status.HTTP_200_OK
+        return {"detail": "User updated"}
 
 @router.get("/users/{email}", response_model=UserOut)
 def get_user(email: str):
