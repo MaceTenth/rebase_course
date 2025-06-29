@@ -41,13 +41,10 @@ class StructuredLogzioFormatter(logging.Formatter):
             'timestamp': datetime.utcnow().isoformat(),
             'logger': record.name,
             'environment': APP_ENV,
-            'application': 'users-microservice',
             'hostname': self.hostname,
             'platform': platform.platform(),
             'python_version': platform.python_version(),
             'function': record.funcName,
-            'line_number': record.lineno,
-            'filename': record.filename,
         }
 
         # Add any extra fields from the StructuredMessage
