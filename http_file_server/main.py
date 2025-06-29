@@ -318,4 +318,4 @@ if __name__ == "__main__":
     logger.info(f"Data directory: {DATA_DIR}")
     logger.info(f"Temporary directory: {TEMP_DIR}")
     logger.info(f"Maximum disk quota: {config.MAX_DISK_QUOTA / (1024*1024):.2f} MB")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=3000)
