@@ -8,8 +8,8 @@ import socket
 import platform
 
 # Logz.io configuration - EU Region
-LOGZIO_TOKEN = os.getenv('LOGZIO_TOKEN', 'mFJpupXOLGfnACdjyGZlomwDdpxVfUFI')
-LOGZIO_URL = os.getenv('LOGZIO_URL', 'https://listener-eu.logz.io:8071')
+LOGZIO_TOKEN = os.getenv('LOGZIO_TOKEN')
+LOGZIO_URL = os.getenv('LOGZIO_URL')
 APP_ENV = os.getenv('APP_ENV', 'development')
 
 class StructuredMessage:
